@@ -1,0 +1,129 @@
+
+#The dataset used here is the GTZAN, which can be downloaded from https://www.kaggle.com/datasets/andradaolteanu/gtzan-dataset-music-genre-classification and the features are in the file, genres_original, in GTZAN.
+
+from python_speech_features import mfcc
+import scipy.io.wavfile as wav
+
+from tempfile import TemporaryFile
+import os
+import pickle
+import random 
+import operator
+
+
+import math
+import numpy as np
+
+
+#Extract features from audio wav files using mfcc function in python_speech_features.
+def extractFeatures(file_path, target_file, i):
+    #samplerate: the samplerate of the signal we are working with.
+    #signal: the audio signal from which to compute features.
+    samplerate,signal = wav.read(file_path)
+    #each 30-sec audio file contains 661794 signals. 
+    #winlen: the length of the analysis window in seconds. Set it to 0.020 seconds.
+    #the number of dimensions of each mfcc is defaulted to 13. And each 30-second audio has 2994 frames.
+    #so, the shape of mfcc_feat of each file is (2994,13).
+    mfcc_feat = mfcc(signal, samplerate, winlen=0.020, appendEnergy = False)
+    mean_matrix = mfcc_feat.mean(0)
+    feature = (mean_matrix, i)  
+    pickle.dump(feature , target_file)
+
+#Extract the audio feattures from all genres in the dataset, and save features into a dat file.
+filepath = "D:/study/coen240/homework/dataset"
+f= open("my.dat" ,'wb')
+i=0
+number_genre = 10
+for folder_list in os.listdir(filepath):
+    i+=1
+    print(i)
+    if i==number_genre+1:
+        break
+    j=0
+    for files in os.listdir(filepath+"/"+folder_list):
+        extractFeatures(filepath+"/"+folder_list+"/"+files, f, i)
+f.close()
+
+#load data of features from file.
+dataset=[]
+def loadDataset(filename, split, tr, te):
+    with open(filename , 'rb') as f:
+        while True:
+            try:
+                dataset.append(pickle.load(f))
+            except EOFError:
+                f.close()
+                break
+    for x in range(len(dataset)):
+        if random.random()<split:
+            tr.append(dataset[x])
+        else:
+            te.append(dataset[x])
+trainingset = []
+test = []
+loadDataset("my.dat" , 0.92, trainingset, test)
+print("train is ",len(trainingset))
+print("test is ",len(test))
+
+train = []
+for i in range(number_genre):
+    temp = []
+    for x in range(len(trainingset)):
+        if trainingset[x][1] == i+1:
+            temp.append(trainingset[x][0])
+    temp = np.array(temp)
+    mean_vector = temp.mean(0)
+    covariance = (temp-mean_vector).T.dot(temp-mean_vector)/len(temp)
+    train.append((mean_vector,covariance,i+1))
+print("finish training_set")
+print("finish test_set")
+
+#Calculate the general discriminant for Multivariate Gaussian density of each sample and make prediction
+
+def predictClass(training_set,instance):
+    predict = np.zeros(len(instance))
+    for i in range(len(instance)):
+        g = []
+        for j in range(number_genre):
+            g.append(-1/2*(instance[i][0]-training_set[j][0]).T.dot(np.linalg.inv(training_set[j][1])).dot((instance[i][0]-training_set[j][0]))-13/2*np.log(2*math.pi)-1/2*np.log(np.linalg.det(training_set[j][1]))+np.log(1/13))
+        general_discriminant = g[0]
+        predict[i] = 1
+        for k in range(number_genre):
+            if general_discriminant < g[k]:
+                predict[i] = k+1
+                general_discriminant = g[k]
+    return predict
+
+result = predictClass(train,test)
+
+#check accuracy
+import matplotlib.pyplot as plt
+from scipy.interpolate import make_interp_spline
+from scipy.interpolate import UnivariateSpline
+acc = 0
+for i in range(len(test)):
+    print(result[i],", ",test[i][1])
+    if result[i]==test[i][1]:
+        acc += 1
+print("accuracy is ",'percent: {:.2%}'.format(acc/len(test)))
+
+acc_genre = np.zeros((number_genre,1))
+count = np.zeros((number_genre,1))
+for i in range(len(test)):
+    count[test[i][1]-1] += 1
+    if(result[i]==test[i][1]):
+        acc_genre[test[i][1]-1]+=1
+x=[]
+y=[]
+for i in range(number_genre):
+    x.append(i+1)
+    y.append(acc_genre[i]/count[i])
+x_new = np.linspace(1,10,1000)
+model = make_interp_spline(x,y)
+ys = model(x_new)
+plt.plot(x, y, c='red')
+plt.title("KNN algorithm")
+plt.legend(title='K=8')
+plt.xlabel("# Genre")
+plt.ylabel("Accuracy")
+plt.show()
